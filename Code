@@ -1,0 +1,408 @@
+void SXAUMillet(char* filename, char* outputpath, string s1, string s2)
+{
+	Mat img;
+	img=imread(filename);
+
+		if(img.data)
+		{
+			Mat image=img.clone();
+
+			vector<int> compression_params;
+			compression_params.push_back(CV_IMWRITE_PNG_COMPRESSION);
+			compression_params.push_back(0);
+
+			Mat img0=img.clone();
+			Mat img1=img.clone();	//using process
+
+			TermCriteria termcrit=TermCriteria(TermCriteria::MAX_ITER+TermCriteria::EPS,5,1);
+
+			/*test
+			cvtColor(img0, img0, CV_BGR2GRAY);
+			threshold( img0, img0, 50, 255, THRESH_BINARY );*/
+
+#pragma omp parallel for
+			for(int l=0; l<img0.cols; l++)
+				for(int k=0; k<img0.rows; k++)	//[0],[1],[2]分别代表B,G,R
+				{
+					if(
+						(img0.at<Vec3b>(k, l)[0]<30 && img0.at<Vec3b>(k, l)[1]<30 && img0.at<Vec3b>(k, l)[2]<30 )	
+
+						//side view
+						||(abs(img0.at<Vec3b>(k, l)[0]-img0.at<Vec3b>(k, l)[2])<=4 && img0.at<Vec3b>(k, l)[1]<=45 && img0.at<Vec3b>(k, l)[1]>25
+						&& img0.at<Vec3b>(k, l)[0]>20 && img0.at<Vec3b>(k, l)[0]<40 && img0.at<Vec3b>(k, l)[2]>20 && img0.at<Vec3b>(k, l)[2]<40
+						)	
+
+						//top view
+						||(img0.at<Vec3b>(k, l)[1]<=65)
+						||(img0.at<Vec3b>(k, l)[0]>=60 && img0.at<Vec3b>(k, l)[0]<=100 && img0.at<Vec3b>(k, l)[1]>67 && img0.at<Vec3b>(k, l)[1]<110 && abs(img0.at<Vec3b>(k, l)[0]-img0.at<Vec3b>(k, l)[1])<10)
+						||(img0.at<Vec3b>(k, l)[0]>=100 && img0.at<Vec3b>(k, l)[0]<110 && img0.at<Vec3b>(k, l)[1]>110 && img0.at<Vec3b>(k, l)[1]<120 && abs(img0.at<Vec3b>(k, l)[0]-img0.at<Vec3b>(k, l)[1])<10)
+						||(img0.at<Vec3b>(k, l)[1]>=60 && img0.at<Vec3b>(k, l)[1]<90 && img0.at<Vec3b>(k, l)[2]>=60 && img0.at<Vec3b>(k, l)[2]<90 && abs(img0.at<Vec3b>(k, l)[1]-img0.at<Vec3b>(k, l)[2])<=10)
+						)
+					{
+						img0.at<Vec3b>(k, l)[0]=255;	//find plants
+						img0.at<Vec3b>(k, l)[1]=255; 
+						img0.at<Vec3b>(k, l)[2]=255;
+					}
+				}
+
+#pragma omp parallel for
+				for(int l=0; l<img1.cols; l++)
+					for(int k=0; k<img1.rows; k++)
+					{
+						if(
+							//side view
+								img1.at<Vec3b>(k, l)[0]<80
+								||(img1.at<Vec3b>(k, l)[0]>=90 && img1.at<Vec3b>(k, l)[1]>=90)
+								)
+						{
+							img1.at<Vec3b>(k, l)[0]=0;	//find pots
+							img1.at<Vec3b>(k, l)[1]=0; 
+							img1.at<Vec3b>(k, l)[2]=0;
+						}
+					}
+
+					Mat tn;
+					tn = img1;
+
+					cvtColor(tn, tn, CV_BGR2GRAY);	//Convert Gray
+
+					threshold(tn, tn, 20, 255, CV_THRESH_BINARY);	//图像的二值化使图像中数据量大为减少，从而能凸显出目标的轮廓。
+					tn=OnMorphology(tn, 2, 2, 1, 1, 0);	//形态学操作，去除边缘
+
+					vector<vector<Point> > contours;
+					vector<Vec4i> hierarchy;
+					vector<Point> BD;
+
+					Rect rectA;
+					rectA.x = 0;
+					rectA.y = 2600;
+					rectA.width = img0.cols;
+					rectA.height = 400;	
+
+					Mat pot(tn, rectA);
+					Mat pot1(image, rectA);
+
+					findContours( pot, contours, hierarchy, CV_RETR_CCOMP , CV_CHAIN_APPROX_SIMPLE, Point(0, 0) );	//构造轮廓
+
+					int idx = 0;
+
+					if(hierarchy.size()>0)
+					{
+						for( ; idx >= 0; idx = hierarchy[idx][0] )
+						{
+							int area=0;
+							area=contourArea(contours[idx], false);
+
+							Rect rect=boundingRect(contours[idx]);
+
+							if(area>150 && rect.height/rect.width<5 && rect.width/rect.height<5)	//定义面积和长宽比
+							{
+								for(int j=0; j<contours[idx].size(); j++)
+									BD.push_back(contours[idx][j]);
+							}
+						}
+					}
+
+					Rect rect=boundingRect(BD);//pot rect
+
+					Rect rectB;
+					rectB.x = 0;
+					rectB.y = 0;
+					rectB.width = rectA.width;
+					rectB.height = 2600+rect.y+rect.height-170;	
+
+					rectangle(image, rectB, Scalar(255,0,255), 2, 8, 0);
+
+					int rootY;
+					rootY=2600+rect.y+rect.height/2;
+
+					line(image, Point(rect.x-200, rootY), Point(rect.x+rect.width+200, rootY), Scalar(0,0,255), 5, 8, 0);
+
+					tn=img0;
+
+					cvtColor(tn, tn, CV_BGR2GRAY);
+
+					threshold(tn, tn, 254, 255, CV_THRESH_BINARY_INV);
+					tn=OnMorphology(tn, 2, 2, 1, 1, 0);
+
+					cvtColor(img0, img0, CV_BGR2GRAY);
+
+					adaptiveThreshold(img0, img0, 255, CV_ADAPTIVE_THRESH_MEAN_C,CV_THRESH_BINARY_INV,75,10);
+					img0=OnMorphology(img0, 2, 2, 1, 1, 0);					
+
+					Mat out;
+					out=img0+tn;
+
+					Mat drawing = Mat::zeros( image.size(), CV_8UC3 );
+
+					Mat roi(out, rectB);
+					Mat roi1(image, rectB);
+					Mat roi2(drawing, rectB);
+
+					contours.clear();
+					hierarchy.clear();
+					BD.clear();
+
+					findContours( roi, contours, hierarchy, CV_RETR_CCOMP , CV_CHAIN_APPROX_SIMPLE, Point(0, 0) );
+					out=0;
+
+					double leafArea=0;
+					double leafArea_mm=0;
+					double pixelcount=0;
+					idx = 0;
+
+
+					Rect plantRect;
+
+					if(hierarchy.size()>0)
+					{
+						for( ; idx >= 0; idx = hierarchy[idx][0] )
+						{
+							int area=0;
+							area=contourArea(contours[idx], false);
+							if(area>1000)
+							{
+								Scalar color( 200, 200, 0 );
+								drawContours( roi1, contours, idx, color, CV_FILLED, 8, hierarchy );
+								drawContours( roi, contours, idx, color, CV_FILLED, 8, hierarchy );
+								drawContours( roi2, contours, idx, color, CV_FILLED, 8, hierarchy );
+								pixelcount=pixelcount+area;
+
+								for(int j=0; j<contours[idx].size(); j++)
+									BD.push_back(contours[idx][j]);
+							}
+						}
+
+						plantRect=boundingRect(BD);
+
+
+						vector<vector<Point> >hull(contours.size());
+						convexHull( Mat(BD), hull[0], false ); 
+
+						int area=0;
+						area=contourArea(hull[0], false);
+
+						fprintf(fp, "%d, %d, %0.f, %d, ", rect.width, rect.height, pixelcount, area);
+
+						Mat h;
+						cvtColor(img, h, CV_BGR2HSV);
+
+						vector<Mat> planes;
+
+						split(h, planes);
+
+						int const cclass=180;//
+						int total=0;
+						int* number=new int[cclass];
+						int* hue=new int[cclass];
+						int* sat=new int[cclass];
+						int* val=new int[cclass];
+
+						for(int i=0; i<=cclass; i++)
+						{
+							number[i]=0;
+							hue[i]=0;
+							sat[i]=0;
+							val[i]=0;
+						}
+
+						cvtColor(drawing, out, CV_BGR2GRAY);
+						threshold( out, out, 5, 255, THRESH_BINARY );
+
+						int red=0;
+						int orange=0;
+						int yellow=0;
+						int green=0;
+						int purple=0;
+
+						for(int l=0; l<img1.cols; l++)
+							for(int k=0; k<img1.rows; k++)
+							{
+								int t=planes[0].at<uchar>(k, l);
+
+								if(out.at<uchar>(k, l)>10)
+								{
+									if(t>=0 && t<=10)//red
+									{
+										number[t]=number[t]+1;
+										hue[t]=hue[t]+planes[0].at<uchar>(k, l);
+										sat[t]=sat[t]+planes[1].at<uchar>(k, l);
+										val[t]=val[t]+planes[2].at<uchar>(k, l);
+
+										planes[0].at<uchar>(k, l)=5;
+										planes[1].at<uchar>(k, l)=255;
+										planes[2].at<uchar>(k, l)=255;
+
+										red=red+1;
+									}
+									if(t>=156 && t<=180)//red
+									{
+										//t=26;
+										number[t]=number[t]+1;
+										hue[t]=hue[t]+planes[0].at<uchar>(k, l);
+										sat[t]=sat[t]+planes[1].at<uchar>(k, l);
+										val[t]=val[t]+planes[2].at<uchar>(k, l);
+
+										planes[0].at<uchar>(k, l)=5;
+										planes[1].at<uchar>(k, l)=255;
+										planes[2].at<uchar>(k, l)=255;
+
+										red=red+1;
+									}
+									if(t>=11 && t<=25)//orange
+									{
+										//t=25;
+										number[t]=number[t]+1;
+										hue[t]=hue[t]+planes[0].at<uchar>(k, l);
+										sat[t]=sat[t]+planes[1].at<uchar>(k, l);
+										val[t]=val[t]+planes[2].at<uchar>(k, l);
+
+										planes[0].at<uchar>(k, l)=20;
+										planes[1].at<uchar>(k, l)=255;
+										planes[2].at<uchar>(k, l)=255;
+
+										orange=orange+1;
+									}
+									if(t>=26 && t<=34)//yellow
+									{
+										//t=26;
+										number[t]=number[t]+1;
+										hue[t]=hue[t]+planes[0].at<uchar>(k, l);
+										sat[t]=sat[t]+planes[1].at<uchar>(k, l);
+										val[t]=val[t]+planes[2].at<uchar>(k, l);
+
+										planes[0].at<uchar>(k, l)=30;
+										planes[1].at<uchar>(k, l)=255;
+										planes[2].at<uchar>(k, l)=255;
+
+										yellow=yellow+1;
+									}
+									if(t>=35 && t<=124)//green
+									{
+										//t=26;
+										number[t]=number[t]+1;
+										hue[t]=hue[t]+planes[0].at<uchar>(k, l);
+										sat[t]=sat[t]+planes[1].at<uchar>(k, l);
+										val[t]=val[t]+planes[2].at<uchar>(k, l);
+
+										planes[0].at<uchar>(k, l)=60;
+										planes[1].at<uchar>(k, l)=255;
+										planes[2].at<uchar>(k, l)=255;
+
+										green=green+1;
+									}
+									if(t>=125 && t<=155)//purple
+									{
+										//t=26;
+										number[t]=number[t]+1;
+										hue[t]=hue[t]+planes[0].at<uchar>(k, l);
+										sat[t]=sat[t]+planes[1].at<uchar>(k, l);
+										val[t]=val[t]+planes[2].at<uchar>(k, l);
+
+										planes[0].at<uchar>(k, l)=140;
+										planes[1].at<uchar>(k, l)=255;
+										planes[2].at<uchar>(k, l)=255;
+
+										purple=purple+1;
+									}
+								}
+							}
+
+							fprintf(fp, "%d, %d, %d, %d, %d, ", red, orange, yellow, green, purple);
+
+
+							for(int i=0; i<cclass; i++)
+							{
+								total = total + number[i];
+							}
+
+							int last=800;
+							for(int i=0; i<cclass; i++)
+							{
+								float p=0;
+
+								if(total!=0 && number[i]!=0)
+								{
+									p=float(number[i])/float(total)*700;
+
+									rectangle(planes[0], Point(2050, last), Point(2100, last-p), Scalar(hue[i]/number[i],hue[i]/number[i],hue[i]/number[i]), -1, 8, 0);
+									rectangle(planes[1], Point(2050, last), Point(2100, last-p), Scalar(sat[i]/number[i],sat[i]/number[i],sat[i]/number[i]), -1, 8, 0);
+									rectangle(planes[2], Point(2050, last), Point(2100, last-p), Scalar(val[i]/number[i],val[i]/number[i],val[i]/number[i]), -1, 8, 0);
+
+									if(i>=0 && i<=10)//red
+									{
+										rectangle(planes[0], Point(2110, last), Point(2120, last-p), Scalar(5,5,5), -1, 8, 0);
+										rectangle(planes[1], Point(2110, last), Point(2120, last-p), Scalar(255,255,255), -1, 8, 0);
+										rectangle(planes[2], Point(2110, last), Point(2120, last-p), Scalar(255,255,255), -1, 8, 0);
+									}
+									if(i>=156 && i<=180)//red
+									{
+										rectangle(planes[0], Point(2110, last), Point(2120, last-p), Scalar(5,5,5), -1, 8, 0);
+										rectangle(planes[1], Point(2110, last), Point(2120, last-p), Scalar(255,255,255), -1, 8, 0);
+										rectangle(planes[2], Point(2110, last), Point(2120, last-p), Scalar(255,255,255), -1, 8, 0);
+									}
+									if(i>=11 && i<=25)//orange
+									{
+										rectangle(planes[0], Point(2110, last), Point(2120, last-p), Scalar(20,20,20), -1, 8, 0);
+										rectangle(planes[1], Point(2110, last), Point(2120, last-p), Scalar(200,200,200), -1, 8, 0);
+										rectangle(planes[2], Point(2110, last), Point(2120, last-p), Scalar(200,200,200), -1, 8, 0);
+									}
+									if(i>=26 && i<=34)//yellow
+									{
+										rectangle(planes[0], Point(2110, last), Point(2120, last-p), Scalar(30,30,30), -1, 8, 0);
+										rectangle(planes[1], Point(2110, last), Point(2120, last-p), Scalar(200,200,200), -1, 8, 0);
+										rectangle(planes[2], Point(2110, last), Point(2120, last-p), Scalar(200,200,200), -1, 8, 0);
+									}
+									if(i>=35 && i<=77)//green
+									{
+										rectangle(planes[0], Point(2110, last), Point(2120, last-p), Scalar(60,60,60), -1, 8, 0);
+										rectangle(planes[1], Point(2110, last), Point(2120, last-p), Scalar(200,200,200), -1, 8, 0);
+										rectangle(planes[2], Point(2110, last), Point(2120, last-p), Scalar(200,200,200), -1, 8, 0);
+									}
+									if(i>=125 && i<=155)//purple
+									{
+										rectangle(planes[0], Point(2110, last), Point(2120, last-p), Scalar(140,140,140), -1, 8, 0);
+										rectangle(planes[1], Point(2110, last), Point(2120, last-p), Scalar(200,200,200), -1, 8, 0);
+										rectangle(planes[2], Point(2110, last), Point(2120, last-p), Scalar(200,200,200), -1, 8, 0);
+									}
+									last=last-p;
+								}
+							}
+
+
+							merge(planes, h);
+							cvtColor(h, image, CV_HSV2BGR);
+							image=image*0.7 + img*0.3;
+
+							drawContours(image, hull, 0, Scalar(200,150,255), 2, 8);
+							rectangle(image, Point(plantRect.x, plantRect.y), Point(plantRect.x+plantRect.width, plantRect.y+plantRect.height), Scalar(255,0,255), 2, 8, 0);
+
+							line(image, Point(plantRect.x+plantRect.width+5, plantRect.y), Point(plantRect.x+plantRect.width+155, plantRect.y), Scalar(0,255,0), 2, 8, 0);
+							line(image, Point(plantRect.x+plantRect.width+5, plantRect.y+plantRect.height), Point(plantRect.x+plantRect.width+155, plantRect.y+plantRect.height), Scalar(0,255,0), 2, 8, 0);
+							line(image, Point(plantRect.x+plantRect.width+150, plantRect.y), Point(plantRect.x+plantRect.width+150, plantRect.y+plantRect.height), Scalar(0,255,0), 2, 8, 0);
+
+							int plant_height;
+							plant_height=2600+rect.y-plantRect.y+(rect.height/2);
+							double p_h=double(plant_height)*(240/double(rect.width));
+							leafArea=pixelcount;
+							leafArea_mm=pixelcount*(240/double(rect.width))*(240/double(rect.width));
+
+							fprintf(fp, "%d, %0.f, %0.f, %0.f\n", plant_height, p_h, leafArea, leafArea_mm);
+
+							char s[200];
+							sprintf_s(s, 200, "%d pixels", plant_height );
+							putText(image, s, Point(plantRect.x+plantRect.width+160, plantRect.y+plantRect.height/2-70), 0, 2, Scalar(155,155,0), 3, 8,false);
+							sprintf_s(s, 200, "%0.f mm", p_h );
+							putText(image, s, Point(plantRect.x+plantRect.width+160, plantRect.y+plantRect.height/2), 0, 2, Scalar(155,155,0), 3, 8,false);
+
+							sprintf_s(s, 200, "%0.f Square pixels", leafArea );
+							putText(image, s, Point(plantRect.x+plantRect.width+160, plantRect.y+plantRect.height/2+70), 0, 2, Scalar(155,155,0), 3, 8,false);
+							sprintf_s(s, 200, "%0.f Square mm", leafArea_mm );
+							putText(image, s, Point(plantRect.x+plantRect.width+160, plantRect.y+plantRect.height/2+140), 0, 2, Scalar(155,155,0), 3, 8,false);
+
+							line(image, Point(plantRect.x-50, plantRect.y+plantRect.height), Point(plantRect.x+plantRect.width+50, plantRect.y+plantRect.height), Scalar(0,0,255), 5, 8, 0);
+					}
+
+					imwrite(outputpath, image);
+		}
+}
